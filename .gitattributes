@@ -1,0 +1,8 @@
+# Windows scripts keep CRLF line endings, also in GitHub's zip downloads (cmd.exe can misparse LF-only files).
+* text=auto
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Keep repo housekeeping out of release zips (git archive).
+.gitattributes export-ignore
+.gitignore export-ignore
