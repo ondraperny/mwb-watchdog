@@ -15,7 +15,7 @@ On each PC:
 3. **Connect the PCs:** on the first PC, select *New key*. On each other PC, enter that key and the first PC's name, then select *Connect*. Arrange the PCs in the layout to match your desk.
 4. **Add IP address mappings:** in the Mouse Without Borders settings, under *IP address mapping*, add a line `<PC name> <IP address>` for every *other* PC, e.g. `LAPTOP 192.168.1.10`. Finding PCs by IP is faster and more reliable than by name. `Install.cmd` (step 6) prints the line for the PC it runs on.
 5. **Optional: reserve the IPs in your router.** Give each PC a fixed IP (a "DHCP reservation") so the mappings never go stale; `Install.cmd` prints the MAC address the router asks for. If you skip this and a PC's IP changes, update its mapping line.
-6. **Install MWB Watchdog:** download [MWB-Watchdog.zip](../../releases/latest/download/MWB-Watchdog.zip) from the latest release, extract it, and double-click `Install.cmd`. No admin rights needed. Windows may warn that the file came from the internet; allow it to run.
+6. **Install MWB Watchdog:** download [MWB-Watchdog.zip](https://github.com/ondraperny/mwb-watchdog/releases/latest/download/MWB-Watchdog.zip) from the latest release, extract it, and double-click `Install.cmd`. No admin rights needed. Windows may warn that the file came from the internet; allow it to run.
 
 To add a PC later, do the same on it and add its mapping line on the existing PCs.
 
