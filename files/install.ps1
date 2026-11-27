@@ -1,9 +1,10 @@
 <#
-  Installs (or updates) MWB Watchdog for the current Windows user. Run it via ..\Install.cmd.
-  - Compiles mwb-watchdog.cs with the C# compiler built into Windows (.NET Framework 4.x).
+  Installs (or updates) MWB Keepalive for the current Windows user. Run it via ..\Install.cmd.
+  - Compiles mwb-keepalive.cs with the C# compiler built into Windows (.NET Framework 4.x).
   - Registers a scheduled task that starts it (tray icon) at every logon.
   - Adds a Start menu entry (to start it again after Exit) and an entry in
     Settings > Apps > Installed apps (to uninstall it).
+  - Replaces MWB Watchdog (this program's name until version 1.1) and keeps its log.
   No admin rights needed. It says what it will do and asks first; if it is already
   installed, it offers to install again (update/repair) or to uninstall.
   -Yes: no questions, just install or update (for scripts).
@@ -11,15 +12,22 @@
 param([switch]$Yes)
 $ErrorActionPreference = 'Stop'
 
-$TaskName      = 'MWB Watchdog'
-$Source        = Join-Path $PSScriptRoot 'mwb-watchdog.cs'
+$TaskName      = 'MWB Keepalive'
+$Source        = Join-Path $PSScriptRoot 'mwb-keepalive.cs'
 $Uninstaller   = Join-Path $PSScriptRoot 'uninstall.ps1'
-$AppDir        = Join-Path $env:LOCALAPPDATA 'MWBWatchdog'
-$Exe           = Join-Path $AppDir 'MWBWatchdog.exe'
+$AppDir        = Join-Path $env:LOCALAPPDATA 'MWBKeepalive'
+$Exe           = Join-Path $AppDir 'MWBKeepalive.exe'
 $MwbSettings   = Join-Path $env:LOCALAPPDATA 'Microsoft\PowerToys\MouseWithoutBorders\settings.json'
-$StartupLink   = Join-Path ([Environment]::GetFolderPath('Startup')) 'MWB Watchdog.lnk'
-$StartMenuLink = Join-Path ([Environment]::GetFolderPath('Programs')) 'MWB Watchdog.lnk'
-$UninstallKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\MWBWatchdog'
+$StartupLink   = Join-Path ([Environment]::GetFolderPath('Startup')) 'MWB Keepalive.lnk'
+$StartMenuLink = Join-Path ([Environment]::GetFolderPath('Programs')) 'MWB Keepalive.lnk'
+$UninstallKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\MWBKeepalive'
+
+# The same program under its former name, MWB Watchdog (version 1.0).
+$OldTaskName     = 'MWB Watchdog'
+$OldAppDir       = Join-Path $env:LOCALAPPDATA 'MWBWatchdog'
+$OldStartupLink  = Join-Path ([Environment]::GetFolderPath('Startup')) 'MWB Watchdog.lnk'
+$OldStartMenuLnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'MWB Watchdog.lnk'
+$OldUninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\MWBWatchdog'
 
 function Step([string]$Text) { Write-Host "-> $Text" -ForegroundColor Cyan }
 
@@ -40,11 +48,11 @@ function Ask([string]$Prompt, [string[]]$Keys) {
 }
 
 Write-Host ''
-Write-Host '=== MWB Watchdog installer ===' -ForegroundColor White
+Write-Host '=== MWB Keepalive installer ===' -ForegroundColor White
 Write-Host ''
 
 # Only one installer at a time (e.g. Install.cmd double-clicked twice).
-$installerLock = New-Object System.Threading.Mutex($false, 'Local\MWBWatchdog-Installer')
+$installerLock = New-Object System.Threading.Mutex($false, 'Local\MWBKeepalive-Installer')
 try { $gotLock = $installerLock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $gotLock = $true }
 if (-not $gotLock) {
     Write-Host 'The installer is already running in another window. Finish or close that one first.' -ForegroundColor Yellow
@@ -58,12 +66,13 @@ foreach ($f in $Source, $Uninstaller) {
 $newVersion = '?'
 if ((Get-Content -Raw -LiteralPath $Source) -match 'AssemblyFileVersion\("([\d.]+)"\)') { $newVersion = Format-Version $Matches[1] }
 $installed = (Test-Path -LiteralPath $AppDir) -or [bool](Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)
+$oldNameInstalled = (Test-Path -LiteralPath $OldAppDir) -or [bool](Get-ScheduledTask -TaskName $OldTaskName -ErrorAction SilentlyContinue)
 
 if (-not $Yes) {
     if ($installed) {
         $oldVersion = 'an older version'
         if (Test-Path -LiteralPath $Exe) { $oldVersion = Format-Version (Get-Item -LiteralPath $Exe).VersionInfo.FileVersion }
-        Write-Host "MWB Watchdog is already installed on this PC (installed: $oldVersion, this folder: $newVersion)."
+        Write-Host "MWB Keepalive is already installed on this PC (installed: $oldVersion, this folder: $newVersion)."
         Write-Host ''
         Write-Host '  [I] Install again - replace it with the version in this folder (update or repair)'
         Write-Host '  [U] Uninstall     - remove it (Mouse Without Borders itself is not changed)'
@@ -77,10 +86,13 @@ if (-not $Yes) {
         }
         if ($choice -ne 'I') { Write-Host 'Nothing was changed.'; exit 0 }
     } else {
-        Write-Host "This installs MWB Watchdog $newVersion for your Windows user. It will:"
+        Write-Host "This installs MWB Keepalive $newVersion for your Windows user. It will:"
         Write-Host '  - build the program on this PC from the included source code'
         Write-Host '  - start it now and at every sign-in (tray icon)'
         Write-Host '  - add it to the Start menu, and to Settings > Apps > Installed apps for uninstalling'
+        if ($oldNameInstalled) {
+            Write-Host '  - replace MWB Watchdog, which is installed on this PC (the same program under its former name)'
+        }
         Write-Host 'No admin rights are needed, and Mouse Without Borders settings are not changed.'
         Write-Host ''
         if ((Ask 'Install now? (Y/N)' @('Y', 'N')) -ne 'Y') { Write-Host 'Nothing was changed.'; exit 0 }
@@ -88,24 +100,24 @@ if (-not $Yes) {
     Write-Host ''
 }
 if (-not (Test-Path -LiteralPath $MwbSettings)) {
-    Write-Warning 'Mouse Without Borders settings were not found. Install PowerToys and set up Mouse Without Borders on this PC; the watchdog will simply wait until then.'
+    Write-Warning 'Mouse Without Borders settings were not found. Install PowerToys and set up Mouse Without Borders on this PC; MWB Keepalive will simply wait until then.'
 }
 
 # 1. Build first, so a failed build leaves any existing installation untouched.
-Step 'Building MWBWatchdog.exe with the C# compiler included in Windows'
+Step 'Building MWBKeepalive.exe with the C# compiler included in Windows'
 $csc = @(
     (Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'),
     (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe')
 ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $csc) { throw 'The .NET Framework 4 C# compiler (csc.exe) was not found. It is part of Windows 10/11; is .NET Framework 4.8 disabled?' }
 
-$build = Join-Path $env:TEMP ('MWBWatchdog-build-' + [Guid]::NewGuid().ToString('N'))
+$build = Join-Path $env:TEMP ('MWBKeepalive-build-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $build -Force | Out-Null
 $manifest = Join-Path $build 'app.manifest'
 @'
 <?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <assemblyIdentity version="1.0.0.0" name="MWBWatchdog"/>
+  <assemblyIdentity version="1.0.0.0" name="MWBKeepalive"/>
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security><requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
       <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
@@ -123,7 +135,7 @@ $manifest = Join-Path $build 'app.manifest'
 $cscArgs = @('/nologo', '/target:winexe', '/optimize+', "/win32manifest:$manifest",
              '/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll',
              '/r:System.Web.Extensions.dll')
-$plainExe = Join-Path $build 'MWBWatchdog-noicon.exe'
+$plainExe = Join-Path $build 'MWBKeepalive-noicon.exe'
 $output = & $csc @cscArgs "/out:$plainExe" $Source 2>&1
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $plainExe)) {
     $output | Where-Object { $_ -match 'error' } | ForEach-Object { Write-Host "   $_" -ForegroundColor Red }
@@ -132,8 +144,8 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $plainExe)) {
 
 # The program draws its own tray icon, so let it write that icon to a file, then build again
 # with it embedded (shown in the Start menu and Installed apps). Not essential - skip on failure.
-$builtExe = Join-Path $build 'MWBWatchdog.exe'
-$iconFile = Join-Path $build 'MWBWatchdog.ico'
+$builtExe = Join-Path $build 'MWBKeepalive.exe'
+$iconFile = Join-Path $build 'MWBKeepalive.ico'
 $p = Start-Process -FilePath $plainExe -ArgumentList "--write-icon `"$iconFile`"" -Wait -PassThru
 if ($p.ExitCode -eq 0 -and (Test-Path -LiteralPath $iconFile)) {
     & $csc @cscArgs "/out:$builtExe" "/win32icon:$iconFile" $Source 2>&1 | Out-Null
@@ -143,14 +155,18 @@ if (-not (Test-Path -LiteralPath $builtExe)) {
     Copy-Item -LiteralPath $plainExe -Destination $builtExe
 }
 
-# 2. Stop and remove any previous version (including the older PowerShell-based one).
+# 2. Stop and remove any previous version (including MWB Watchdog and the older PowerShell-based one).
 Step 'Removing any previous version'
-if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+foreach ($task in $TaskName, $OldTaskName) {
+    if (Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue) {
+        Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $task -Confirm:$false
+    }
 }
-if (Test-Path -LiteralPath $StartupLink) { Remove-Item -LiteralPath $StartupLink -Force }
-Get-Process -Name 'MWBWatchdog' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+foreach ($link in $StartupLink, $OldStartupLink, $OldStartMenuLnk) {
+    if (Test-Path -LiteralPath $link) { Remove-Item -LiteralPath $link -Force }
+}
+Get-Process -Name 'MWBKeepalive', 'MWBWatchdog' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
     Where-Object { $_.CommandLine -like '*mwb-watchdog.ps1*' -and $_.ProcessId -ne $PID } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -159,12 +175,22 @@ Start-Sleep -Milliseconds 500
 # 3. Put the program in a fixed place in the user profile.
 Step "Installing to $AppDir"
 New-Item -ItemType Directory -Path $AppDir -Force | Out-Null
-Remove-Item -LiteralPath (Join-Path $AppDir 'mwb-watchdog.ps1') -Force -ErrorAction SilentlyContinue
 Copy-Item -LiteralPath $builtExe -Destination $Exe -Force
 Copy-Item -LiteralPath $Uninstaller -Destination (Join-Path $AppDir 'uninstall.ps1') -Force
 Remove-Item -LiteralPath $build -Recurse -Force -ErrorAction SilentlyContinue
 
-Step 'Adding "MWB Watchdog" to the Start menu (starts it again if you exit it)'
+# Under its former name the program lived in MWBWatchdog: keep its log, then remove the rest.
+if (Test-Path -LiteralPath $OldAppDir) {
+    $oldLog = Join-Path $OldAppDir 'watchdog.log'
+    $newLog = Join-Path $AppDir 'keepalive.log'
+    if ((Test-Path -LiteralPath $oldLog) -and -not (Test-Path -LiteralPath $newLog)) {
+        Copy-Item -LiteralPath $oldLog -Destination $newLog
+    }
+    Remove-Item -LiteralPath $OldAppDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path -LiteralPath $OldUninstallKey) { Remove-Item -LiteralPath $OldUninstallKey -Recurse -Force }
+
+Step 'Adding "MWB Keepalive" to the Start menu (starts it again if you exit it)'
 $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut($StartMenuLink)
 $lnk.TargetPath = $Exe
@@ -177,7 +203,7 @@ Step 'Adding it to Settings > Apps > Installed apps (to uninstall it from there)
 $powershell = Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
 New-Item -Path $UninstallKey -Force | Out-Null
 $entry = @{
-    DisplayName     = 'MWB Watchdog'
+    DisplayName     = 'MWB Keepalive'
     DisplayIcon     = $Exe
     DisplayVersion  = Format-Version (Get-Item -LiteralPath $Exe).VersionInfo.FileVersion
     Comments        = 'Keeps PowerToys Mouse Without Borders connected'
@@ -214,7 +240,7 @@ try {
     $lnk = $shell.CreateShortcut($StartupLink)
     $lnk.TargetPath = $Exe
     $lnk.WorkingDirectory = $AppDir
-    $lnk.Description = 'MWB Watchdog'
+    $lnk.Description = 'MWB Keepalive'
     $lnk.Save()
     Start-Process -FilePath $Exe -WorkingDirectory $AppDir
     $mode = 'startup'
@@ -284,5 +310,5 @@ if ($mode -eq 'task') { Write-Host "Installed. It starts automatically when you 
 else { Write-Host 'Installed. It starts automatically when you log in (Startup folder).' -ForegroundColor Green }
 Write-Host 'Tray icon (round, with a mouse): green = connected, orange = reconnecting, grey = other PC off, red = problem.'
 Write-Host 'Click it for details, "Reconnect now" and the log.'
-Write-Host 'If you exit it, start it again from the Start menu: "MWB Watchdog".'
-Write-Host 'To remove it: Settings > Apps > Installed apps > MWB Watchdog > Uninstall.'
+Write-Host 'If you exit it, start it again from the Start menu: "MWB Keepalive".'
+Write-Host 'To remove it: Settings > Apps > Installed apps > MWB Keepalive > Uninstall.'

@@ -1,4 +1,4 @@
-// MWB Watchdog - keeps PowerToys "Mouse Without Borders" (MWB) connected.
+// MWB Keepalive - keeps PowerToys "Mouse Without Borders" (MWB) connected.
 //
 // MWB only retries a lost connection when Windows reports that the network went from
 // "unavailable" to "available". On PCs with VPN / virtual adapters that never happens, so
@@ -8,10 +8,10 @@
 //
 // Built by install.ps1 with the C# compiler that ships with Windows (.NET Framework 4.x),
 // so it is plain C# 5. Usage:
-//   MWBWatchdog.exe              run in the tray (what the scheduled task does)
-//   MWBWatchdog.exe --start      Start menu entry: start it, or say it is already running
-//   MWBWatchdog.exe --status     print the current state
-//   MWBWatchdog.exe --reconnect  tell MWB to reconnect now
+//   MWBKeepalive.exe              run in the tray (what the scheduled task does)
+//   MWBKeepalive.exe --start      Start menu entry: start it, or say it is already running
+//   MWBKeepalive.exe --status     print the current state
+//   MWBKeepalive.exe --reconnect  tell MWB to reconnect now
 
 using System;
 using System.Collections.Generic;
@@ -34,13 +34,13 @@ using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
-[assembly: AssemblyTitle("MWB Watchdog")]
-[assembly: AssemblyProduct("MWB Watchdog")]
+[assembly: AssemblyTitle("MWB Keepalive")]
+[assembly: AssemblyProduct("MWB Keepalive")]
 [assembly: AssemblyDescription("Keeps PowerToys Mouse Without Borders connected")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
-namespace MwbWatchdog
+namespace MwbKeepalive
 {
     static class Config
     {
@@ -48,8 +48,8 @@ namespace MwbWatchdog
         public const string PipeName           = @"MouseWithoutBorders\SettingsSync";
         // Same event the MWB hotkey / Command Palette "Reconnect" uses (fallback only).
         public const string ReconnectEventName = @"Local\PowerToysMWB-ReconnectEvent-b8d7c6a5-f4e3-2b1c-0a9d-8e7f6a5b4c3d";
-        public const string MutexName          = @"Local\MWBWatchdog-SingleInstance";
-        public const string TaskName           = "MWB Watchdog"; // scheduled task created by install.ps1
+        public const string MutexName          = @"Local\MWBKeepalive-SingleInstance";
+        public const string TaskName           = "MWB Keepalive"; // scheduled task created by install.ps1
 
         public const int LoopMs             = 2000; // how often MWB's state is checked
         public const int ProbeEverySec      = 3;    // how often a disconnected PC is knocked on
@@ -68,8 +68,8 @@ namespace MwbWatchdog
         public static readonly int[] BackoffSec = { 15, 30, 60, 120, 300 };
 
         static readonly string LocalAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        public static readonly string AppDir       = Path.Combine(LocalAppData, "MWBWatchdog");
-        public static readonly string LogFile      = Path.Combine(AppDir, "watchdog.log");
+        public static readonly string AppDir       = Path.Combine(LocalAppData, "MWBKeepalive");
+        public static readonly string LogFile      = Path.Combine(AppDir, "keepalive.log");
         public static readonly string SettingsFile = Path.Combine(LocalAppData, @"Microsoft\PowerToys\MouseWithoutBorders\settings.json");
 
         static readonly string[] StatusNames = { "NA", "Resolving", "Connecting", "Handshaking", "Error", "ForceClosed", "InvalidKey", "Timeout", "SendError", "Connected" };
@@ -174,7 +174,7 @@ namespace MwbWatchdog
 
     static class Json
     {
-        // Only used from one thread per process (the watchdog thread, or the CLI).
+        // Only used from one thread per process (the monitoring thread, or the CLI).
         public static readonly JavaScriptSerializer Serializer = new JavaScriptSerializer();
 
         public static object Parse(string text) { return Serializer.DeserializeObject(text); }
@@ -311,7 +311,7 @@ namespace MwbWatchdog
         }
     }
 
-    // ---------------------------------------------------------------- watchdog
+    // --------------------------------------------------------------- keepalive
     enum Overall { Starting, Connected, Waiting, Reconnecting, Problem }
 
     sealed class PeerView
@@ -347,7 +347,7 @@ namespace MwbWatchdog
         public Task<IPAddress[]> Pending;
     }
 
-    sealed class Watchdog
+    sealed class Keeper
     {
         readonly object gate = new object();
         readonly Dictionary<string, PeerState> peers = new Dictionary<string, PeerState>(StringComparer.OrdinalIgnoreCase);
@@ -377,7 +377,7 @@ namespace MwbWatchdog
 
         public void Run()
         {
-            Log.Write("Watchdog started on " + Environment.MachineName + " (pid " + Process.GetCurrentProcess().Id + ").");
+            Log.Write("MWB Keepalive started on " + Environment.MachineName + " (pid " + Process.GetCurrentProcess().Id + ").");
             while (!stopRequested)
             {
                 try { Tick(); }
@@ -514,7 +514,7 @@ namespace MwbWatchdog
 
             if (wanted.Count == 0) return;
 
-            // Small random delay so watchdogs on two PCs rarely fire together,
+            // Small random delay so the copies on two PCs rarely fire together,
             // then re-check: the other side may already have fixed it.
             Thread.Sleep(random.Next(200, 1500));
             List<string> still = wanted;
@@ -628,7 +628,7 @@ namespace MwbWatchdog
     {
         static readonly Color ConnectedColor = Color.FromArgb(40, 160, 70);
 
-        readonly Watchdog dog = new Watchdog();
+        readonly Keeper keeper = new Keeper();
         readonly NotifyIcon tray;
         readonly ContextMenuStrip menu = new ContextMenuStrip();
         readonly System.Windows.Forms.Timer refresh = new System.Windows.Forms.Timer();
@@ -647,7 +647,7 @@ namespace MwbWatchdog
             boldFont = new Font(menu.Font, FontStyle.Bold);
 
             menu.Opening += (s, e) => { BuildMenu(); e.Cancel = false; };
-            tray = new NotifyIcon { Icon = icons[Overall.Starting], Text = "MWB Watchdog: starting...", ContextMenuStrip = menu, Visible = true };
+            tray = new NotifyIcon { Icon = icons[Overall.Starting], Text = "MWB Keepalive: starting...", ContextMenuStrip = menu, Visible = true };
             tray.MouseUp += (s, e) =>
             {
                 if (e.Button != MouseButtons.Left) return;
@@ -656,7 +656,7 @@ namespace MwbWatchdog
                 if (show != null) show.Invoke(tray, null);
             };
 
-            var worker = new Thread(dog.Run) { IsBackground = true, Name = "watchdog" };
+            var worker = new Thread(keeper.Run) { IsBackground = true, Name = "keepalive" };
             worker.Start();
 
             refresh.Interval = 1000;
@@ -666,7 +666,7 @@ namespace MwbWatchdog
 
         void UpdateTray()
         {
-            Snapshot snap = dog.GetSnapshot();
+            Snapshot snap = keeper.GetSnapshot();
             if (snap.State != shownState) { tray.Icon = icons[snap.State]; shownState = snap.State; }
             string text = "MWB: " + snap.Summary;
             if (text.Length > 63) text = text.Substring(0, 60) + "...";
@@ -675,18 +675,18 @@ namespace MwbWatchdog
 
         void BuildMenu()
         {
-            Snapshot snap = dog.GetSnapshot();
+            Snapshot snap = keeper.GetSnapshot();
             menu.Items.Clear();
-            menu.Items.Add(new ToolStripMenuItem("MWB Watchdog") { Enabled = false, Font = boldFont });
+            menu.Items.Add(new ToolStripMenuItem("MWB Keepalive") { Enabled = false, Font = boldFont });
             if (snap.Peers.Count == 0)
                 menu.Items.Add(new ToolStripMenuItem(snap.Summary) { Enabled = false });
             foreach (PeerView p in snap.Peers)
                 menu.Items.Add(new ToolStripMenuItem(p.Name + ": " + p.Text) { Enabled = false });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Reconnect now", null, (s, e) => dog.RequestReconnect());
+            menu.Items.Add("Reconnect now", null, (s, e) => keeper.RequestReconnect());
             menu.Items.Add("Open log", null, (s, e) => OpenLog());
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Exit watchdog (until next sign-in)", null, (s, e) => ExitApp());
+            menu.Items.Add("Exit MWB Keepalive (until next sign-in)", null, (s, e) => ExitApp());
         }
 
         static void OpenLog()
@@ -697,10 +697,10 @@ namespace MwbWatchdog
 
         void ExitApp()
         {
-            Log.Write("Watchdog stopped from the tray menu.");
+            Log.Write("MWB Keepalive stopped from the tray menu.");
             refresh.Stop();
             tray.Visible = false;
-            dog.Stop();
+            keeper.Stop();
             ExitThread();
         }
 
@@ -836,24 +836,24 @@ namespace MwbWatchdog
                 if (stdout == IntPtr.Zero || stdout == new IntPtr(-1)) AttachConsole(-1);
                 if (arg == "status") return PrintStatus();
                 if (arg == "reconnect") return ManualReconnect();
-                Console.WriteLine("MWB Watchdog. Usage: MWBWatchdog.exe [--start | --status | --reconnect]");
+                Console.WriteLine("MWB Keepalive. Usage: MWBKeepalive.exe [--start | --status | --reconnect]");
                 return arg == "help" || arg == "?" || arg == "h" ? 0 : 2;
             }
             return RunTray();
         }
 
-        // The Start menu entry: start the watchdog if it isn't running, otherwise say where it is.
+        // The Start menu entry: start it if it isn't running, otherwise say where it is.
         static int StartFromShortcut()
         {
             Application.EnableVisualStyles();
             if (IsRunning())
             {
-                MessageBox.Show("MWB Watchdog is already running.\n\nIts icon (a round badge with a mouse) is in the " +
+                MessageBox.Show("MWB Keepalive is already running.\n\nIts icon (a round badge with a mouse) is in the " +
                     "notification area of the taskbar. Click it for the connection status.",
-                    "MWB Watchdog", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "MWB Keepalive", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return 0;
             }
-            // Prefer the scheduled task, which restarts the watchdog if it ever crashes.
+            // Prefer the scheduled task, which restarts it if it ever crashes.
             try
             {
                 var psi = new ProcessStartInfo("schtasks.exe", "/run /tn \"" + Config.TaskName + "\"")
@@ -931,7 +931,7 @@ namespace MwbWatchdog
                     peer, Config.StatusName(code), reachable, via, string.Join(", ", addresses.Select(a => a.ToString()))));
             }
 
-            Console.WriteLine("Watchdog: " + (IsRunning() ? "running (tray icon)" : "not running"));
+            Console.WriteLine("MWB Keepalive: " + (IsRunning() ? "running (tray icon)" : "not running"));
             return 0;
         }
     }
